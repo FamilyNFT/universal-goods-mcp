@@ -51,6 +51,7 @@ export function registerMetadataTools(server: McpServer): void {
       slug: z.string().describe("Section slug"),
       organizationId: z.string().optional().describe("Organization ID (defaults to token's org_id)"),
       title: z.string().describe("Display title for the detail section"),
+      visibility: z.enum(["public", "private", "selective"]).default("public").describe("Visibility level for this section"),
       typeUri: z.string().optional().describe("Schema type URI (helps the server resolve the schema)"),
       data: z.record(z.any()).describe("Section data conforming to the schema"),
     },

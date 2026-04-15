@@ -3,7 +3,8 @@ const UG_API_URL = process.env.UG_API_URL ?? "https://app.universalgoods.xyz/api
 let _rawToken: string | null = null;
 let _apiKey: string | null = null;
 let _orgId: string | null = null;
-let _authMode: "bearer" | "apikey" = "bearer";
+let _sessionCookie: string | null = null;
+let _authMode: "bearer" | "apikey" | "session" = "bearer";
 
 export function setRawToken(token: string | null): void {
   _rawToken = token;
@@ -29,11 +30,19 @@ export function getOrgId(): string | null {
   return _orgId;
 }
 
-export function setAuthMode(mode: "bearer" | "apikey"): void {
+export function setSessionCookie(cookie: string | null): void {
+  _sessionCookie = cookie;
+}
+
+export function getSessionCookie(): string | null {
+  return _sessionCookie;
+}
+
+export function setAuthMode(mode: "bearer" | "apikey" | "session"): void {
   _authMode = mode;
 }
 
-export function getAuthMode(): "bearer" | "apikey" {
+export function getAuthMode(): "bearer" | "apikey" | "session" {
   return _authMode;
 }
 
@@ -62,7 +71,10 @@ export async function ugFetch(
     "Content-Type": "application/json",
   };
 
-  if (_authMode === "apikey") {
+  if (_authMode === "session") {
+    if (!_sessionCookie) throw new Error("No session cookie configured. Set UG_SESSION_COOKIE in .env");
+    headers["Cookie"] = _sessionCookie;
+  } else if (_authMode === "apikey") {
     if (!_apiKey) throw new Error("No API key configured");
     headers["x-api-key"] = _apiKey;
   } else {

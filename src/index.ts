@@ -6,7 +6,7 @@ import { cors } from "hono/cors";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
-import { setRawToken, setOrgId, setApiKey, setAuthMode } from "./api-client.js";
+import { setRawToken, setOrgId, setApiKey, setAuthMode, setSessionCookie } from "./api-client.js";
 import { registerWhoamiTool } from "./tools/whoami.js";
 import { registerProductTools } from "./tools/products.js";
 import { registerBatchTools } from "./tools/batches.js";
@@ -22,6 +22,10 @@ const AUTH_ISSUER = process.env.AUTH_ISSUER ?? "http://localhost:4060/api/auth";
 const AUTH_SERVER = process.env.AUTH_SERVER ?? AUTH_ISSUER;
 const RESOURCE_URL = process.env.RESOURCE_URL ?? "http://localhost:3100";
 const PORT = parseInt(process.env.PORT ?? "3100", 10);
+
+// Session cookie auth from env (for CLI usage without browser OAuth flow)
+const ENV_SESSION_COOKIE = process.env.UG_SESSION_COOKIE ?? null;
+const ENV_ORG_ID = process.env.UG_ORG_ID ?? null;
 
 const JWKS = createRemoteJWKSet(new URL(`${AUTH_SERVER}/jwks`));
 
@@ -109,11 +113,12 @@ function verifyApiKey(
 
 // MCP transport endpoint
 app.all("/mcp", async (c) => {
-  // Try API key auth first, then fall back to Bearer JWT
+  // Try API key auth first, then Bearer JWT, then env session cookie
   const apiKeyResult = verifyApiKey(c);
   const bearerResult = apiKeyResult ? null : await verifyBearer(c.req.header("authorization"));
+  const hasEnvSession = !apiKeyResult && !bearerResult && ENV_SESSION_COOKIE;
 
-  if (!apiKeyResult && !bearerResult) {
+  if (!apiKeyResult && !bearerResult && !hasEnvSession) {
     return c.json({ error: "unauthorized" }, 401, {
       "WWW-Authenticate": `Bearer resource_metadata="${RESOURCE_URL}/.well-known/oauth-protected-resource"`,
     });
@@ -125,11 +130,21 @@ app.all("/mcp", async (c) => {
     setApiKey(apiKeyResult.apiKey);
     setOrgId(apiKeyResult.orgId);
     setRawToken(null);
+    setSessionCookie(null);
   } else if (bearerResult) {
     _currentJwt = bearerResult.jwt;
     setAuthMode("bearer");
     setRawToken(bearerResult.rawToken);
     setOrgId((bearerResult.jwt as any).org_id ?? null);
+    setApiKey(null);
+    setSessionCookie(null);
+  } else if (hasEnvSession) {
+    // Session cookie from .env — allows CLI usage without browser OAuth
+    _currentJwt = null;
+    setAuthMode("session");
+    setSessionCookie(ENV_SESSION_COOKIE);
+    setOrgId(ENV_ORG_ID);
+    setRawToken(null);
     setApiKey(null);
   }
 
@@ -145,6 +160,7 @@ app.all("/mcp", async (c) => {
     _currentJwt = null;
     setRawToken(null);
     setApiKey(null);
+    setSessionCookie(null);
     setOrgId(null);
     setAuthMode("bearer");
   }
