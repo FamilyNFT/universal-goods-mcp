@@ -7,8 +7,6 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "mcp:dev": "vite",
-    "mcp:build": "vite build",
     "mcp:start": "node dist/index.js"
   },
   "dependencies": {
@@ -28,15 +26,12 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@hono/vite-build": "^1.0.0",
-    "@hono/vite-dev-server": "^0.24.0",
     "@types/node": "^20.19.21",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.14",
-    "typescript": "^5.8.3",
-    "vite": "^6.0.0"
+    "typescript": "^5.8.3"
   }
 }
