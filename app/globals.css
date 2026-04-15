@@ -1,0 +1,87 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Ice White background */
+  --background: 230 33% 97%;
+  --foreground: 0 0% 14%;
+
+  /* Card styling */
+  --card: 230 33% 98%;
+  --card-foreground: 0 0% 14%;
+
+  --popover: 230 33% 98%;
+  --popover-foreground: 0 0% 14%;
+
+  /* Ocean Blue primary */
+  --primary: 211 100% 52%;
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 230 20% 92%;
+  --secondary-foreground: 0 0% 14%;
+
+  --muted: 230 20% 92%;
+  --muted-foreground: 240 4% 46%;
+
+  --accent: 230 20% 92%;
+  --accent-foreground: 0 0% 14%;
+
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+
+  --border: 230 20% 90%;
+  --input: 230 20% 90%;
+  --ring: 211 100% 52%;
+
+  --radius: 0.5rem;
+
+  --chart-1: 211 100% 52%;
+  --chart-2: 173 58% 39%;
+  --chart-3: 197 37% 24%;
+  --chart-4: 43 74% 66%;
+  --chart-5: 27 87% 67%;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Typing indicator animation */
+@keyframes typing-dot {
+  0%, 60%, 100% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.typing-dot {
+  animation: typing-dot 1.4s ease-in-out infinite;
+}
+
+.typing-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+/* Safe area for iOS */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
