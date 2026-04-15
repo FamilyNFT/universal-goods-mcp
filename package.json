@@ -6,17 +6,12 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "mcp:start": "node dist/index.js"
+    "lint": "next lint"
   },
   "dependencies": {
-    "@hono/node-server": "^1.19.12",
-    "@modelcontextprotocol/sdk": "^1.24.0",
     "@radix-ui/react-slot": "^1.1.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
-    "hono": "^4.12.10",
-    "jose": "^6.2.2",
     "lucide-react": "^0.462.0",
     "next": "^15.0.0",
     "react": "^19.0.0",
