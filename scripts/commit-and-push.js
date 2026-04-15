@@ -1,4 +1,4 @@
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 
 const commitMessage = `feat: add Scout supplier chat interface with file attachment support
 
@@ -24,16 +24,20 @@ Key additions:
 - shadcn/ui primitives (Button, Card, Input) wired to a custom
   Ice-White / Ocean-Blue design-token palette.
 - iOS safe-area padding and typing-indicator animation for a native
-  feel on mobile.`;
+  feel on mobile.
 
-function run(cmd) {
-  console.log(`> ${cmd}`);
-  const output = execSync(cmd, { cwd: "/vercel/share/v0-project", encoding: "utf-8" });
+Co-authored-by: v0[bot] <v0[bot]@users.noreply.github.com>`;
+
+const cwd = "/vercel/share/v0-project";
+
+function git(...args) {
+  console.log(`> git ${args.join(" ")}`);
+  const output = execFileSync("git", args, { cwd, encoding: "utf-8" });
   if (output.trim()) console.log(output.trim());
 }
 
-run("git add -A");
-run(`git commit -m ${JSON.stringify(commitMessage)}`);
-run("git push origin supplier-chat-interface");
+git("add", "-A");
+git("commit", "-m", commitMessage);
+git("push", "origin", "supplier-chat-interface");
 
 console.log("Done! Committed and pushed to supplier-chat-interface.");
