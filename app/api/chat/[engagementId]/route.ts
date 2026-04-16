@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { readEngagement, writeEngagement } from "@/lib/engagement-store";
+import { pushFieldsToUGP, type SyncResult } from "@/lib/ugp-client";
 import { execFileSync } from "child_process";
 import { writeFileSync, unlinkSync, mkdtempSync } from "fs";
 import { join } from "path";
@@ -179,13 +180,17 @@ ENTERPRISE-PROVIDED CONTEXT:
 ${Object.entries(eng.filledByEnterprise).map(([k, v]) => `- ${k}: ${v}`).join("\n")}
 
 RULES:
-- Be warm, brief (1-3 sentences), and professional.
 - Extract precise values from the supplier's message and map them to field keys.
 - The supplier may attach documents (spec sheets, certificates, etc.). Extract ALL relevant field values from the document content. A single document may fill many fields at once.
-- If a value is ambiguous, ask ONE clarifying question.
-- Set status to "complete" ONLY when ALL missing fields listed above have values.
+- Set status to "complete" ONLY when ALL REQUIRED missing fields have values.
 - Never fabricate or guess data — only record what the supplier explicitly provides or what is clearly stated in attached documents.
 - Do NOT mention: blockchain, NFT, crypto, Web3, gas fees, wallet, on-chain, decentralised.
+
+REPLY FORMAT (be concise and direct):
+- First line: one-sentence acknowledgement of what was received (e.g. "Got it — extracted 5 fields from the spec sheet.").
+- Then: "Still needed:" followed by a bulleted list of the REQUIRED field labels that remain empty after this update. Use "- " bullets, one field per line.
+- If all required fields are now filled, say "All required fields collected." and omit the list.
+- No pleasantries, no follow-up questions, no restating what was extracted. Just acknowledgement + remaining list.
 
 Respond with JSON ONLY, no markdown fences:
 {"reply": "your message to the supplier", "fieldUpdates": {"field_key": "extracted value"}, "status": "gathering" | "complete"}`;
@@ -193,7 +198,7 @@ Respond with JSON ONLY, no markdown fences:
   try {
     const response = await client.messages.create({
       model: MODEL,
-      max_tokens: 1024,
+      max_tokens: 4096,
       system: systemPrompt,
       messages: conversationHistory,
     });
@@ -213,17 +218,41 @@ Respond with JSON ONLY, no markdown fences:
       parsed = { reply: cleaned, fieldUpdates: {}, status: "gathering" };
     }
 
-    // Apply field updates
+    // Apply field updates locally and track which are new (for UGP sync)
+    const newUpdates: Record<string, string> = {};
     for (const [key, value] of Object.entries(parsed.fieldUpdates)) {
       if (value && value.trim()) {
-        eng.filledBySupplier[key] = value.trim();
+        const trimmed = value.trim();
+        if (eng.filledBySupplier[key] !== trimmed) {
+          newUpdates[key] = trimmed;
+        }
+        eng.filledBySupplier[key] = trimmed;
       }
     }
 
-    // Append agent reply
+    // Push new fields to UGP platform so the enterprise's product page updates
+    // automatically. Failures are non-fatal — we still record the supplier data.
+    let sync: SyncResult | null = null;
+    if (Object.keys(newUpdates).length > 0) {
+      try {
+        sync = await pushFieldsToUGP(eng.productId, newUpdates);
+        if (sync.errors.length) {
+          console.error("[chat] UGP sync errors:", sync.errors);
+        } else if (sync.sectionsUpdated.length) {
+          console.log("[chat] UGP synced sections:", sync.sectionsUpdated);
+        }
+      } catch (err) {
+        console.error("[chat] UGP sync failed:", (err as Error).message);
+      }
+    }
+
+    // Append agent reply, annotating with sync status when successful
+    const syncNote = sync?.sectionsUpdated.length
+      ? `\n\n_Synced to ${eng.enterpriseName}: ${sync.sectionsUpdated.join(", ")}._`
+      : "";
     eng.messages.push({
       role: "agent",
-      content: parsed.reply,
+      content: parsed.reply + syncNote,
       timestamp: new Date().toISOString(),
     });
 
@@ -252,6 +281,7 @@ Respond with JSON ONLY, no markdown fences:
       fieldUpdates: parsed.fieldUpdates,
       status: eng.status,
       fields,
+      sync,
     });
   } catch (err: unknown) {
     const error = err as Error & { status?: number; message?: string };
