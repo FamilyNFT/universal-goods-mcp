@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { use } from "react";
-import { ArrowUp, Paperclip, FileText, ImageIcon, File, X } from "lucide-react";
+import { ArrowUp, Paperclip, FileText, ImageIcon, File, X, CheckCircle2, Circle } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,6 +15,7 @@ interface FileAttachment {
   size: number;
   type: string;
   url: string;
+  data?: string; // base64-encoded file content
 }
 
 interface Message {
@@ -25,91 +26,33 @@ interface Message {
   attachments?: FileAttachment[];
 }
 
-interface FieldStatus {
-  id: string;
+interface FieldView {
+  name: string;
   label: string;
-  collected: boolean;
+  required: boolean;
+  value: string | null;
+  source: "enterprise" | "supplier" | null;
 }
 
-type FieldKey = "fibre_composition" | "dye_process" | "recycled_content";
-
-// Field definitions
-const FIELDS: FieldStatus[] = [
-  { id: "fibre_composition", label: "Fibre composition", collected: false },
-  { id: "dye_process", label: "Dye process", collected: false },
-  { id: "recycled_content", label: "Recycled content %", collected: false },
-];
-
-// Keyword matching for each field
-const FIELD_KEYWORDS: Record<FieldKey, string[]> = {
-  fibre_composition: ["cotton", "organic", "polyester", "elastane", "nylon", "wool", "silk", "%"],
-  dye_process: ["dye", "indigo", "natural", "synthetic", "low-impact", "reactive", "pigment"],
-  recycled_content: ["recycled", "virgin", "post-consumer", "pre-consumer", "upcycled"],
-};
-
-// Agent responses
-const AGENT_RESPONSES = {
-  initial:
-    "Hi! I'm helping Acme Apparel prepare a Digital Product Passport for the Organic Cotton Crew Sock. They've shared most of the data with me — I just need a few details from you to finish it off. Sound good?",
-  fibre_composition_ask:
-    "Great! Let's start with the fibre composition. Could you tell me the breakdown of materials used in this product? Even a rough percentage split would be helpful.",
-  fibre_composition_collected: (content: string) => {
-    const hasPercentages = content.includes("%") || /\d+/.test(content);
-    if (hasPercentages) {
-      return "Got it — thanks for that breakdown. Quick one on the dyeing — what process does the cotton go through? Anything natural, low-impact, or standard reactive dyes?";
-    }
-    return "Got it. Quick one on the dyeing — what process does the cotton go through? Anything natural, low-impact, or standard reactive dyes?";
-  },
-  fibre_composition_clarify:
-    "Could you give me the breakdown by percentage? Even a rough split like '80% cotton, 20% polyester' is fine.",
-  dye_process_collected:
-    "Perfect, low-impact dyes noted. Last question — what percentage of the materials are recycled content, if any?",
-  dye_process_clarify:
-    "I just need to know about the dye process used. Is it natural dyes, low-impact, reactive, or another method?",
-  recycled_content_collected:
-    "Perfect — that's everything I need. I'll hand this back to Acme Apparel for review. Thanks for your time!",
-  recycled_content_clarify:
-    "Almost done! I just need to know the recycled content percentage. Is any of the material recycled, or is it all virgin material?",
-  greeting_response:
-    "Great! Let's start with the fibre composition. Could you tell me the breakdown of materials used in this product? Even a rough percentage split would be helpful.",
-  file_received: (count: number) =>
-    count === 1
-      ? "Thanks, I've received the file! Let me take note of that. Could you also confirm the details in the chat so I can log them properly?"
-      : `Thanks, I've received those ${count} files! Let me take note of them. Could you also confirm the key details in the chat so I can log them properly?`,
-};
-
-// Check if message matches field keywords
-function matchesField(message: string, field: FieldKey): boolean {
-  const lowerMessage = message.toLowerCase();
-  const keywords = FIELD_KEYWORDS[field];
-  
-  // Check for percentage pattern
-  if (field === "fibre_composition" || field === "recycled_content") {
-    if (/\d+\s*%/.test(message) || /\d+\s*percent/i.test(message)) {
-      return true;
-    }
-  }
-  
-  return keywords.some((keyword) => lowerMessage.includes(keyword.toLowerCase()));
+interface EngagementData {
+  id: string;
+  productId: string;
+  productName: string;
+  sku: string;
+  enterpriseName: string;
+  supplierName: string;
+  status: "gathering" | "complete" | "minted";
+  missingFields: Array<{ name: string; label: string }>;
+  filledBySupplier: Record<string, string>;
+  messages: Array<{ role: "agent" | "supplier"; content: string; timestamp: string }>;
+  fields: FieldView[];
 }
 
-// Check if it's a simple greeting/affirmation
-function isGreeting(message: string): boolean {
-  const greetings = [
-    "yes", "yeah", "yep", "sure", "ok", "okay", "sounds good", 
-    "hi", "hello", "hey", "great", "perfect", "let's go", "ready",
-    "go ahead", "fire away", "shoot"
-  ];
-  const lower = message.toLowerCase().trim();
-  return greetings.some((g) => lower === g || lower.startsWith(g + " ") || lower.startsWith(g + "!") || lower.startsWith(g + "."));
-}
-
-// Generate unique ID
+// Helpers
 function generateId(): string {
   return Math.random().toString(36).substring(2, 11);
 }
 
-// Format timestamp
 function formatTime(date: Date): string {
   return date.toLocaleTimeString("en-US", {
     hour: "numeric",
@@ -118,36 +61,29 @@ function formatTime(date: Date): string {
   });
 }
 
-// Format file size
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-// Get file icon based on type
 function getFileIcon(type: string) {
   if (type.startsWith("image/")) return ImageIcon;
   if (type === "application/pdf") return FileText;
   return File;
 }
 
-// Accepted file types
 const ACCEPTED_FILE_TYPES = [
   "application/pdf",
   "image/png",
   "image/jpeg",
   "image/webp",
-  "image/gif",
   "application/msword",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "text/csv",
   "text/plain",
 ].join(",");
 
-// Check if timestamps should be shown (2+ minutes apart)
 function shouldShowTimestamp(current: Date, previous: Date | null): boolean {
   if (!previous) return true;
   return current.getTime() - previous.getTime() >= 2 * 60 * 1000;
@@ -156,10 +92,20 @@ function shouldShowTimestamp(current: Date, previous: Date | null): boolean {
 // Header Component
 function HeaderCard({
   engagementId,
+  enterpriseName,
+  productName,
+  sku,
   fields,
+  filledBySupplier,
+  status,
 }: {
   engagementId: string;
-  fields: FieldStatus[];
+  enterpriseName: string;
+  productName: string;
+  sku: string;
+  fields: Array<{ name: string; label: string }>;
+  filledBySupplier: Record<string, string>;
+  status: string;
 }) {
   return (
     <Card className="rounded-2xl border-0 bg-[#F5F6FC] p-4 shadow-sm">
@@ -168,40 +114,53 @@ function HeaderCard({
           SCOUT
         </span>
         <span className="font-mono text-xs text-muted-foreground">
-          {engagementId.substring(0, 8)}
+          {engagementId}
         </span>
       </div>
-      
+
       <div className="mt-3">
         <h1 className="text-base font-semibold leading-tight text-foreground">
-          Helping Acme Apparel complete a Digital Product Passport
+          Helping {enterpriseName} complete a Digital Product Passport
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          For: Organic Cotton Crew Sock — SKU OCS-2026-01
+          For: {productName} — SKU {sku}
         </p>
       </div>
 
+      {status === "complete" && (
+        <div className="mt-3 rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-700">
+          All fields collected — passport data complete
+        </div>
+      )}
+
       <div className="mt-4 flex flex-wrap gap-2">
-        {fields.map((field) => (
-          <div
-            key={field.id}
-            className={cn(
-              "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
-              field.collected
-                ? "bg-green-50 text-green-700"
-                : "bg-secondary text-muted-foreground"
-            )}
-          >
-            <span className="text-sm">{field.collected ? "✅" : "⚪"}</span>
-            <span>{field.label}</span>
-          </div>
-        ))}
+        {fields.map((field) => {
+          const collected = !!filledBySupplier[field.name];
+          return (
+            <div
+              key={field.name}
+              className={cn(
+                "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
+                collected
+                  ? "bg-green-50 text-green-700"
+                  : "bg-secondary text-muted-foreground"
+              )}
+            >
+              {collected ? (
+                <CheckCircle2 className="h-3.5 w-3.5" />
+              ) : (
+                <Circle className="h-3.5 w-3.5" />
+              )}
+              <span>{field.label}</span>
+            </div>
+          );
+        })}
       </div>
     </Card>
   );
 }
 
-// File Attachment Chip (in message bubbles)
+// File Attachment Chip
 function AttachmentChip({
   attachment,
   isAgent,
@@ -213,12 +172,9 @@ function AttachmentChip({
   const isImage = attachment.type.startsWith("image/");
 
   return (
-    <a
-      href={attachment.url}
-      target="_blank"
-      rel="noopener noreferrer"
+    <div
       className={cn(
-        "flex items-center gap-2 rounded-xl p-2 transition-opacity hover:opacity-80",
+        "flex items-center gap-2 rounded-xl p-2",
         isAgent ? "bg-background/60" : "bg-white/15"
       )}
     >
@@ -226,7 +182,6 @@ function AttachmentChip({
         <img
           src={attachment.url}
           alt={attachment.name}
-          crossOrigin="anonymous"
           className="h-12 w-12 rounded-lg object-cover"
         />
       ) : (
@@ -247,11 +202,11 @@ function AttachmentChip({
           {formatFileSize(attachment.size)}
         </p>
       </div>
-    </a>
+    </div>
   );
 }
 
-// Message Bubble Component
+// Message Bubble
 function MessageBubble({
   message,
   showTimestamp,
@@ -263,9 +218,7 @@ function MessageBubble({
   const hasAttachments = message.attachments && message.attachments.length > 0;
 
   return (
-    <div
-      className={cn("flex flex-col", isAgent ? "items-start" : "items-end")}
-    >
+    <div className={cn("flex flex-col", isAgent ? "items-start" : "items-end")}>
       <div
         className={cn(
           "max-w-[80%] text-sm leading-relaxed",
@@ -295,7 +248,7 @@ function MessageBubble({
   );
 }
 
-// Typing Indicator Component
+// Typing Indicator
 function TypingIndicator() {
   return (
     <div className="flex items-start">
@@ -322,12 +275,7 @@ function StagedFile({
   return (
     <div className="relative flex items-center gap-2 rounded-xl bg-secondary p-2">
       {isImage ? (
-        <img
-          src={file.url}
-          alt={file.name}
-          crossOrigin="anonymous"
-          className="h-10 w-10 rounded-lg object-cover"
-        />
+        <img src={file.url} alt={file.name} className="h-10 w-10 rounded-lg object-cover" />
       ) : (
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-background">
           <Icon className="h-5 w-5 text-muted-foreground" />
@@ -349,7 +297,7 @@ function StagedFile({
   );
 }
 
-// Input Bar Component
+// Input Bar
 function InputBar({
   onSend,
   disabled,
@@ -371,23 +319,31 @@ function InputBar({
     }
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
-
-    const newAttachments: FileAttachment[] = Array.from(files).map((file) => ({
-      id: generateId(),
-      name: file.name,
-      size: file.size,
-      type: file.type,
-      url: URL.createObjectURL(file),
-    }));
-
+    const newAttachments: FileAttachment[] = await Promise.all(
+      Array.from(files).map(async (file) => {
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result as string;
+            resolve(result.split(",")[1]); // strip data:...;base64, prefix
+          };
+          reader.readAsDataURL(file);
+        });
+        return {
+          id: generateId(),
+          name: file.name,
+          size: file.size,
+          type: file.type || "application/octet-stream",
+          url: URL.createObjectURL(file),
+          data: base64,
+        };
+      })
+    );
     setStagedFiles((prev) => [...prev, ...newAttachments]);
-    // Reset file input
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const removeStagedFile = (id: string) => {
@@ -399,16 +355,13 @@ function InputBar({
   };
 
   useEffect(() => {
-    if (inputRef.current) {
-      inputRef.current.focus();
-    }
-  }, []);
+    if (!disabled && inputRef.current) inputRef.current.focus();
+  }, [disabled]);
 
   const hasContent = value.trim() || stagedFiles.length > 0;
 
   return (
     <div className="border-t border-border bg-background safe-area-bottom">
-      {/* Staged files */}
       {stagedFiles.length > 0 && (
         <div className="flex flex-col gap-2 border-b border-border px-3 py-2">
           {stagedFiles.map((file) => (
@@ -416,8 +369,6 @@ function InputBar({
           ))}
         </div>
       )}
-
-      {/* Input row */}
       <form onSubmit={handleSubmit} className="flex items-center gap-2 p-3">
         <input
           ref={fileInputRef}
@@ -427,7 +378,6 @@ function InputBar({
           onChange={handleFileSelect}
           className="sr-only"
           id="file-upload"
-          aria-label="Attach files"
         />
         <Button
           type="button"
@@ -444,7 +394,7 @@ function InputBar({
           ref={inputRef}
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          placeholder="Type your reply..."
+          placeholder={disabled ? "All fields collected" : "Type your reply..."}
           disabled={disabled}
           className="flex-1 rounded-full border-secondary bg-secondary px-4 focus-visible:ring-1"
         />
@@ -462,22 +412,19 @@ function InputBar({
   );
 }
 
-// Main Chat Page Component
+// Main Chat Page
 export default function ChatPage({
   params,
 }: {
   params: Promise<{ engagementId: string }>;
 }) {
   const { engagementId } = use(params);
+  const [engagement, setEngagement] = useState<EngagementData | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [fields, setFields] = useState<FieldStatus[]>(FIELDS);
   const [isTyping, setIsTyping] = useState(false);
-  const [isComplete, setIsComplete] = useState(false);
-  const [currentFieldIndex, setCurrentFieldIndex] = useState(0);
-  const [hasReceivedFirstResponse, setHasReceivedFirstResponse] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
@@ -486,110 +433,137 @@ export default function ChatPage({
     scrollToBottom();
   }, [messages, isTyping, scrollToBottom]);
 
-  // Add agent message with typing delay
-  const addAgentMessage = useCallback((content: string, delay = 1200 + Math.random() * 600) => {
-    setIsTyping(true);
-    setTimeout(() => {
-      setIsTyping(false);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: generateId(),
-          role: "agent",
-          content,
-          timestamp: new Date(),
-        },
-      ]);
-    }, delay);
-  }, []);
-
-  // Initial agent message
+  // Load engagement on mount
   useEffect(() => {
-    if (messages.length === 0) {
-      const timer = setTimeout(() => {
-        addAgentMessage(AGENT_RESPONSES.initial, 800);
-      }, 500);
-      return () => clearTimeout(timer);
-    }
-  }, [messages.length, addAgentMessage]);
+    fetch(`/api/chat/${engagementId}`)
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to load engagement");
+        return res.json();
+      })
+      .then((data: EngagementData) => {
+        setEngagement(data);
+        setMessages(
+          data.messages.map((m) => ({
+            id: generateId(),
+            role: m.role,
+            content: m.content,
+            timestamp: new Date(m.timestamp),
+          }))
+        );
+      })
+      .catch((err) => setError(err.message));
+  }, [engagementId]);
 
-  // Handle supplier message
+  // Handle supplier sending a message
   const handleSendMessage = useCallback(
-    (content: string, attachments?: FileAttachment[]) => {
-      // Add supplier message
-      const supplierMessage: Message = {
+    async (content: string, attachments?: FileAttachment[]) => {
+      if (!engagement) return;
+
+      // Append supplier message locally
+      const supplierMsg: Message = {
         id: generateId(),
         role: "supplier",
         content,
         timestamp: new Date(),
         attachments,
       };
-      setMessages((prev) => [...prev, supplierMessage]);
+      setMessages((prev) => [...prev, supplierMsg]);
+      setIsTyping(true);
 
-      // Process response
-      const fieldOrder: FieldKey[] = ["fibre_composition", "dye_process", "recycled_content"];
-      const currentField = fieldOrder[currentFieldIndex];
-
-      // If only files sent with no text, acknowledge them
-      if (!content && attachments && attachments.length > 0) {
-        if (!hasReceivedFirstResponse) setHasReceivedFirstResponse(true);
-        addAgentMessage(AGENT_RESPONSES.file_received(attachments.length));
-        return;
-      }
-
-      // Check if this is first response (greeting)
-      if (!hasReceivedFirstResponse) {
-        setHasReceivedFirstResponse(true);
-        if (isGreeting(content)) {
-          addAgentMessage(AGENT_RESPONSES.greeting_response);
-          return;
+      try {
+        const payload: Record<string, unknown> = { message: content };
+        if (attachments?.length) {
+          payload.files = attachments.map((a) => ({
+            name: a.name,
+            type: a.type,
+            data: a.data,
+          }));
         }
-      }
+        const res = await fetch(`/api/chat/${engagementId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
 
-      // Check if all fields are collected
-      if (currentFieldIndex >= fieldOrder.length) {
-        return;
-      }
+        if (!res.ok) throw new Error("Failed to send message");
 
-      // Check if message matches current field
-      if (matchesField(content, currentField)) {
-        // Mark field as collected
-        setFields((prev) =>
-          prev.map((f) =>
-            f.id === currentField ? { ...f, collected: true } : f
-          )
+        const data = await res.json();
+
+        // Append agent reply
+        const agentMsg: Message = {
+          id: generateId(),
+          role: "agent",
+          content: data.reply,
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, agentMsg]);
+
+        // Update engagement state
+        setEngagement((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: data.status,
+                filledBySupplier: {
+                  ...prev.filledBySupplier,
+                  ...data.fieldUpdates,
+                },
+                fields: data.fields,
+              }
+            : prev
         );
-
-        // Move to next field
-        const nextIndex = currentFieldIndex + 1;
-        setCurrentFieldIndex(nextIndex);
-
-        // Generate response
-        if (currentField === "fibre_composition") {
-          addAgentMessage(AGENT_RESPONSES.fibre_composition_collected(content));
-        } else if (currentField === "dye_process") {
-          addAgentMessage(AGENT_RESPONSES.dye_process_collected);
-        } else if (currentField === "recycled_content") {
-          addAgentMessage(AGENT_RESPONSES.recycled_content_collected);
-          setIsComplete(true);
-        }
-      } else {
-        // Clarifying question
-        const clarifyKey = `${currentField}_clarify` as keyof typeof AGENT_RESPONSES;
-        const response = AGENT_RESPONSES[clarifyKey];
-        if (typeof response === "string") {
-          addAgentMessage(response);
-        }
+      } catch {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: generateId(),
+            role: "agent",
+            content: "Sorry, something went wrong. Please try again.",
+            timestamp: new Date(),
+          },
+        ]);
+      } finally {
+        setIsTyping(false);
       }
     },
-    [currentFieldIndex, hasReceivedFirstResponse, addAgentMessage]
+    [engagement, engagementId]
   );
+
+  if (error) {
+    return (
+      <main className="flex h-dvh items-center justify-center bg-background">
+        <p className="text-sm text-muted-foreground">{error}</p>
+      </main>
+    );
+  }
+
+  if (!engagement) {
+    return (
+      <main className="flex h-dvh items-center justify-center bg-background">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <span className="typing-dot h-2 w-2 rounded-full bg-muted-foreground" />
+          <span className="typing-dot h-2 w-2 rounded-full bg-muted-foreground" />
+          <span className="typing-dot h-2 w-2 rounded-full bg-muted-foreground" />
+        </div>
+      </main>
+    );
+  }
+
+  const isComplete = engagement.status === "complete";
 
   return (
     <main className="mx-auto flex h-dvh max-w-md flex-col bg-background">
       {/* Header */}
       <div className="shrink-0 p-4 pb-0">
-        <HeaderCard engagementId={engagementId || "loading..."} fields={fields} />
+        <HeaderCard
+          engagementId={engagement.id}
+          enterpriseName={engagement.enterpriseName}
+          productName={engagement.productName}
+          sku={engagement.sku}
+          fields={engagement.missingFields}
+          filledBySupplier={engagement.filledBySupplier}
+          status={engagement.status}
+        />
       </div>
 
       {/* Messages */}
